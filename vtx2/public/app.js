@@ -10,7 +10,13 @@ const DB = {
     localStorage.setItem('vtx_db_' + key, JSON.stringify(val));
   },
   init() {
-    if (!this.get('users')) {
+    let resetForSeed = false;
+    if (!localStorage.getItem('seeded_v3')) {
+      localStorage.clear();
+      localStorage.setItem('seeded_v3', 'true');
+      resetForSeed = true;
+    }
+    if (!this.get('users') || resetForSeed) {
       this.set('users', [
         { id: 1, username: 'ae', full_name: 'Trịnh Văn A', role: 'AE', block: 'Khối A', role_label: 'Account Executive (AE)' },
         { id: 2, username: 'sales', full_name: 'Trịnh Văn Doanh', role: 'GDSALES', block: 'Khối A', role_label: 'Giám đốc Sales' },
@@ -20,22 +26,73 @@ const DB = {
         { id: 6, username: 'ketoan', full_name: 'Lê Thị Toán', role: 'KETOAN', block: null, role_label: 'Kế toán' },
       ]);
     }
-    if (!this.get('customers')) {
+    if (!this.get('customers') || resetForSeed) {
       this.set('customers', [
         { id: 1, code: '012', name: 'Sở TT&TT tỉnh Bắc Giang' },
         { id: 2, code: '002', name: 'UBND tỉnh Quảng Ninh' },
         { id: 3, code: '022', name: 'Bộ Tài chính' },
+        { id: 4, code: '030', name: 'Sở Thông tin và Truyền thông tỉnh Bắc Ninh' }
       ]);
     }
-    if (!this.get('opportunities')) this.set('opportunities', []);
-    if (!this.get('codes')) this.set('codes', []);
-    if (!this.get('requests')) this.set('requests', []);
-    if (!this.get('approvals')) this.set('approvals', []);
-    if (!this.get('pakd_phases')) this.set('pakd_phases', []);
-    if (!this.get('sx_budgets')) this.set('sx_budgets', []);
-    if (!this.get('budget_adjusts')) this.set('budget_adjusts', []);
-    if (!this.get('audit_log')) this.set('audit_log', []);
-    if (!this.get('attachments')) this.set('attachments', []);
+    if (!this.get('opportunities') || resetForSeed) {
+      this.set('opportunities', [
+        { id: 1, name: 'Trung tâm Dữ liệu tập trung tỉnh Bắc Ninh', customer_id: 4, block: 'Khối A', ae_id: 1, bod_basis: 'Nghị quyết số 45/NQ-HĐND tỉnh Bắc Ninh', status: 'OPEN', want_sale: 1, want_sx: 1, created_at: '2026-06-20T10:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('codes') || resetForSeed) {
+      this.set('codes', [
+        { id: 1, opportunity_id: 1, code: '030.825', type: 'TONG', parent_id: null, purpose: 'Mã gom dự án', status: 'ACTIVE', created_at: '2026-06-20T10:05:00.000Z' },
+        { id: 2, opportunity_id: 1, code: '030.825.1', type: 'SALE', parent_id: 1, purpose: 'Pipeline/Sales', status: 'ACTIVE', created_at: '2026-06-20T10:10:00.000Z' },
+        { id: 3, opportunity_id: 1, code: '030.825.2', type: 'SX', parent_id: 1, purpose: 'Sản xuất/Triển khai', status: 'ACTIVE', created_at: '2026-06-20T10:10:00.000Z' }
+      ]);
+    }
+    if (!this.get('requests') || resetForSeed) {
+      this.set('requests', [
+        { id: 1, opportunity_id: 1, kind: 'OPEN_CODE', title: 'Mở mã Tổng — Trung tâm Dữ liệu tập trung tỉnh Bắc Ninh', payload: JSON.stringify({ code_type: 'TONG', purpose: 'Mã gom dự án' }), requested_by: 1, step: 1, status: 'APPROVED', created_at: '2026-06-20T10:00:00.000Z', updated_at: '2026-06-20T10:05:00.000Z' },
+        { id: 2, opportunity_id: 1, kind: 'OPEN_CODE', title: 'Mở mã Kinh doanh', payload: JSON.stringify({ code_type: 'SALE', parent_id: 1, purpose: 'Pipeline/Sales' }), requested_by: 1, step: 1, status: 'APPROVED', created_at: '2026-06-20T10:05:00.000Z', updated_at: '2026-06-20T10:10:00.000Z' },
+        { id: 3, opportunity_id: 1, kind: 'OPEN_CODE', title: 'Mở mã Sản xuất', payload: JSON.stringify({ code_type: 'SX', parent_id: 1, purpose: 'Sản xuất/Triển khai', branch: 'SX' }), requested_by: 1, step: 1, status: 'APPROVED', created_at: '2026-06-20T10:05:00.000Z', updated_at: '2026-06-20T10:10:00.000Z' },
+        { id: 4, opportunity_id: 1, kind: 'PAKD_PHASE', title: 'Duyệt PAKD MVP1', payload: JSON.stringify({ phase_id: 1, label: 'MVP1', branch: 'SALES' }), requested_by: 1, step: 1, status: 'APPROVED', created_at: '2026-06-21T09:00:00.000Z', updated_at: '2026-06-21T10:00:00.000Z' },
+        { id: 5, opportunity_id: 1, kind: 'SX_BUDGET', title: 'Duyệt phân bổ NS Sản xuất MVP1', payload: JSON.stringify({ sx_budget_id: 1, branch: 'SX' }), requested_by: 3, step: 1, status: 'APPROVED', created_at: '2026-06-22T14:00:00.000Z', updated_at: '2026-06-22T15:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('approvals') || resetForSeed) {
+      this.set('approvals', [
+        { id: 1, request_id: 1, step: 1, actor_id: 4, decision: 'APPROVE', comment: 'Duyệt mở mã tổng', created_at: '2026-06-20T10:05:00.000Z' },
+        { id: 2, request_id: 2, step: 1, actor_id: 4, decision: 'APPROVE', comment: 'Duyệt mở mã kinh doanh', created_at: '2026-06-20T10:10:00.000Z' },
+        { id: 3, request_id: 3, step: 1, actor_id: 4, decision: 'APPROVE', comment: 'Duyệt mở mã sản xuất', created_at: '2026-06-20T10:10:00.000Z' },
+        { id: 4, request_id: 4, step: 1, actor_id: 4, decision: 'APPROVE', comment: 'Đã xem xét và thông qua phương án kinh doanh MVP1', created_at: '2026-06-21T10:00:00.000Z' },
+        { id: 5, request_id: 5, step: 1, actor_id: 4, decision: 'APPROVE', comment: 'Thông qua phân bổ ngân sách sản xuất chi tiết', created_at: '2026-06-22T15:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('pakd_phases') || resetForSeed) {
+      this.set('pakd_phases', [
+        { id: 1, opportunity_id: 1, branch: 'SALES', mvp_no: 1, label: 'MVP1', status: 'APPROVED', contract_value: 15000000000, pct_rd: 0.05, pct_dev: 0.30, pct_reserve: 0.05, pct_bonus: 0.02, pct_warranty: 0.05, pct_sal: 0.04, pct_external: 0.02, pct_travel: 0.01, pct_contingency: 0.02, pct_sales_bonus: 0.01, pct_audit: 0.02, pct_finance: 0.03, pct_overhead: 0.04, created_by: 1, created_at: '2026-06-21T09:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('sx_budgets') || resetForSeed) {
+      this.set('sx_budgets', [
+        { id: 1, opportunity_id: 1, sales_phase_id: 1, ceiling: 5985000000, pct_dev: 0.70, pct_reserve: 0.10, pct_bonus: 0.05, pct_warranty: 0.10, pct_outsource: 0.05, status: 'APPROVED', created_by: 3, created_at: '2026-06-22T14:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('budget_adjusts') || resetForSeed) this.set('budget_adjusts', []);
+    if (!this.get('audit_log') || resetForSeed) {
+      this.set('audit_log', [
+        { id: 1, opportunity_id: 1, actor_id: 1, branch: 'SALES', change_type: 'OPP_CREATE', detail: 'Tạo cơ hội: Trung tâm Dữ liệu tập trung tỉnh Bắc Ninh', created_at: '2026-06-20T10:00:00.000Z' },
+        { id: 2, opportunity_id: 1, actor_id: 1, branch: 'SALES', change_type: 'REQUEST_CREATE', detail: 'Tạo yêu cầu [OPEN_CODE]: Mở mã Tổng — Trung tâm Dữ liệu tập trung tỉnh Bắc Ninh', created_at: '2026-06-20T10:00:00.000Z' },
+        { id: 3, opportunity_id: 1, actor_id: 4, branch: 'SALES', change_type: 'CODE_OPEN', detail: 'Mở mã TONG: 030.825', created_at: '2026-06-20T10:05:00.000Z' },
+        { id: 4, opportunity_id: 1, actor_id: 1, branch: 'SALES', change_type: 'REQUEST_CREATE', detail: 'Tạo yêu cầu [OPEN_CODE]: Mở mã Kinh doanh', created_at: '2026-06-20T10:05:00.000Z' },
+        { id: 5, opportunity_id: 1, actor_id: 1, branch: 'SX', change_type: 'REQUEST_CREATE', detail: 'Tạo yêu cầu [OPEN_CODE]: Mở mã Sản xuất', created_at: '2026-06-20T10:05:00.000Z' },
+        { id: 6, opportunity_id: 1, actor_id: 4, branch: 'SALES', change_type: 'CODE_OPEN', detail: 'Mở mã SALE: 030.825.1', created_at: '2026-06-20T10:10:00.000Z' },
+        { id: 7, opportunity_id: 1, actor_id: 4, branch: 'SX', change_type: 'CODE_OPEN', detail: 'Mở mã SX: 030.825.2', created_at: '2026-06-20T10:10:00.000Z' },
+        { id: 8, opportunity_id: 1, actor_id: 1, branch: 'SALES', change_type: 'PAKD_CREATE', detail: 'Lập PAKD Kinh doanh MVP1 (chờ GĐ Khối duyệt)', created_at: '2026-06-21T09:00:00.000Z' },
+        { id: 9, opportunity_id: 1, actor_id: 1, branch: 'SALES', change_type: 'REQUEST_CREATE', detail: 'Tạo yêu cầu [PAKD_PHASE]: Duyệt PAKD MVP1', created_at: '2026-06-21T09:00:00.000Z' },
+        { id: 10, opportunity_id: 1, actor_id: 4, branch: 'SALES', change_type: 'PAKD_APPROVE', detail: 'Duyệt PAKD Kinh doanh MVP1 → cộng vào tổng', created_at: '2026-06-21T10:00:00.000Z' },
+        { id: 11, opportunity_id: 1, actor_id: 3, branch: 'SX', change_type: 'SX_BUDGET_CREATE', detail: 'Phân bổ ngân sách Sản xuất cho MVP1 (trần 5,985,000,000 VNĐ)', created_at: '2026-06-22T14:00:00.000Z' },
+        { id: 12, opportunity_id: 1, actor_id: 3, branch: 'SX', change_type: 'REQUEST_CREATE', detail: 'Tạo yêu cầu [SX_BUDGET]: Duyệt phân bổ NS Sản xuất MVP1', created_at: '2026-06-22T14:00:00.000Z' },
+        { id: 13, opportunity_id: 1, actor_id: 4, branch: 'SX', change_type: 'SX_BUDGET_APPROVE', detail: 'Duyệt phân bổ ngân sách Sản xuất', created_at: '2026-06-22T15:00:00.000Z' }
+      ]);
+    }
+    if (!this.get('attachments') || resetForSeed) this.set('attachments', []);
   }
 };
 DB.init();
