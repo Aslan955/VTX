@@ -1,9 +1,781 @@
 'use strict';
 let ME=null, TAB='opps', SUBTAB='ALL', CUSTOMERS=[];
 const $=(s,r=document)=>r.querySelector(s);
-const api=async(url,opts={})=>{const isForm=opts.body instanceof FormData;
-  const r=await fetch(url,{headers:isForm?{}:{'Content-Type':'application/json'},...opts});
-  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Lỗi máy chủ');return d;};
+const DB = {
+  get(key) {
+    const val = localStorage.getItem('vtx_db_' + key);
+    return val ? JSON.parse(val) : null;
+  },
+  set(key, val) {
+    localStorage.setItem('vtx_db_' + key, JSON.stringify(val));
+  },
+  init() {
+    if (!this.get('users')) {
+      this.set('users', [
+        { id: 1, username: 'ae', full_name: 'Trịnh Văn A', role: 'AE', block: 'Khối A', role_label: 'Account Executive (AE)' },
+        { id: 2, username: 'sales', full_name: 'Trịnh Văn Doanh', role: 'GDSALES', block: 'Khối A', role_label: 'Giám đốc Sales' },
+        { id: 3, username: 'sanxuat', full_name: 'Trịnh Văn Xuất', role: 'GDSX', block: 'Khối A', role_label: 'Giám đốc Sản xuất' },
+        { id: 4, username: 'khoi', full_name: 'Trịnh Văn Khối', role: 'GDKHOI', block: 'Khối A', role_label: 'Giám đốc Khối' },
+        { id: 5, username: 'ceo', full_name: 'CT / CEO', role: 'CTCEO', block: null, role_label: 'CT / CEO' },
+        { id: 6, username: 'ketoan', full_name: 'Lê Thị Toán', role: 'KETOAN', block: null, role_label: 'Kế toán' },
+      ]);
+    }
+    if (!this.get('customers')) {
+      this.set('customers', [
+        { id: 1, code: '012', name: 'Sở TT&TT tỉnh Bắc Giang' },
+        { id: 2, code: '002', name: 'UBND tỉnh Quảng Ninh' },
+        { id: 3, code: '022', name: 'Bộ Tài chính' },
+      ]);
+    }
+    if (!this.get('opportunities')) this.set('opportunities', []);
+    if (!this.get('codes')) this.set('codes', []);
+    if (!this.get('requests')) this.set('requests', []);
+    if (!this.get('approvals')) this.set('approvals', []);
+    if (!this.get('pakd_phases')) this.set('pakd_phases', []);
+    if (!this.get('sx_budgets')) this.set('sx_budgets', []);
+    if (!this.get('budget_adjusts')) this.set('budget_adjusts', []);
+    if (!this.get('audit_log')) this.set('audit_log', []);
+    if (!this.get('attachments')) this.set('attachments', []);
+  }
+};
+DB.init();
+
+function log(opportunity_id, actor_id, branch, change_type, detail) {
+  const logs = DB.get('audit_log') || [];
+  logs.push({
+    id: logs.length + 1,
+    opportunity_id,
+    actor_id,
+    branch,
+    change_type,
+    detail,
+    created_at: new Date().toISOString()
+  });
+  DB.set('audit_log', logs);
+}
+
+function genTongCode(customer_code) {
+  const codes = DB.get('codes') || [];
+  for (let i = 0; i < 300; i++) {
+    const xxx = String(Math.floor(100 + Math.random() * 900));
+    const code = `${customer_code}.${xxx}`;
+    if (!codes.some(c => c.code === code)) return code;
+  }
+  throw new Error('Không sinh được mã tổng duy nhất');
+}
+
+function childCode(parent, type) {
+  const codes = DB.get('codes') || [];
+  if (type === 'SALE') return `${parent.code}.1`;
+  if (type === 'SX') return `${parent.code}.2`;
+  if (type === 'OUTSOURCE') {
+    const sib = codes.filter(c => c.parent_id === parent.id && c.type === 'OUTSOURCE').length;
+    return `${parent.code}.${sib + 1}`;
+  }
+  throw new Error('Loại mã con không hợp lệ');
+}
+
+function createRequest({ opportunity_id, kind, title, payload, requested_by, branch = 'SALES' }) {
+  const reqs = DB.get('requests') || [];
+  const id = reqs.length + 1;
+  reqs.push({
+    id,
+    opportunity_id,
+    kind,
+    title,
+    payload: JSON.stringify(payload),
+    requested_by,
+    step: 1,
+    status: 'PENDING',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+  DB.set('requests', reqs);
+  log(opportunity_id, requested_by, branch, 'REQUEST_CREATE', `Tạo yêu cầu [${kind}]: ${title}`);
+  return id;
+}
+
+function actOnRequest(request_id, actor, decision, comment) {
+  const reqs = DB.get('requests') || [];
+  const req = reqs.find(r => r.id === request_id);
+  if (!req || req.status !== 'PENDING') throw new Error('Yêu cầu không tồn tại hoặc đã xử lý');
+  if (actor.role !== 'GDKHOI') throw new Error('Chỉ Giám đốc Khối được phê duyệt');
+
+  const approvals = DB.get('approvals') || [];
+  approvals.push({
+    id: approvals.length + 1,
+    request_id,
+    step: 1,
+    actor_id: actor.id,
+    decision,
+    comment: comment || '',
+    created_at: new Date().toISOString()
+  });
+  DB.set('approvals', approvals);
+
+  const p = JSON.parse(req.payload);
+  const branch = p.branch || 'SALES';
+
+  if (decision === 'REJECT') {
+    req.status = 'REJECTED';
+    req.updated_at = new Date().toISOString();
+    DB.set('requests', reqs);
+
+    if (req.kind === 'PAKD_PHASE') {
+      const phases = DB.get('pakd_phases') || [];
+      const ph = phases.find(x => x.id === p.phase_id);
+      if (ph) { ph.status = 'REJECTED'; DB.set('pakd_phases', phases); }
+    }
+    if (req.kind === 'SX_BUDGET') {
+      const budgets = DB.get('sx_budgets') || [];
+      const bg = budgets.find(x => x.id === p.sx_budget_id);
+      if (bg) { bg.status = 'REJECTED'; DB.set('sx_budgets', budgets); }
+    }
+    if (req.kind === 'BUDGET_ADJ') {
+      const adjusts = DB.get('budget_adjusts') || [];
+      const adj = adjusts.find(x => x.id === p.adj_id);
+      if (adj) { adj.status = 'REJECTED'; DB.set('budget_adjusts', adjusts); }
+    }
+    log(req.opportunity_id, actor.id, branch, 'REQUEST_REJECT', `Từ chối #${request_id}`);
+    return { status: 'REJECTED' };
+  }
+
+  req.status = 'APPROVED';
+  req.updated_at = new Date().toISOString();
+  DB.set('requests', reqs);
+
+  applyApproved(req, p, actor, branch);
+  return { status: 'APPROVED' };
+}
+
+function applyApproved(req, p, actor, branch) {
+  if (req.kind === 'OPEN_CODE') applyOpenCode(req, p, actor, branch);
+  else if (req.kind === 'CLOSE_CODE') applyCloseCode(req, p, actor, branch);
+  else if (req.kind === 'PAKD_PHASE') {
+    const phases = DB.get('pakd_phases') || [];
+    const ph = phases.find(x => x.id === p.phase_id);
+    if (ph) { ph.status = 'APPROVED'; DB.set('pakd_phases', phases); }
+    log(req.opportunity_id, actor.id, branch, 'PAKD_APPROVE', `Duyệt PAKD ${branch === 'SX' ? 'Sản xuất' : 'Kinh doanh'} ${p.label} → cộng vào tổng`);
+  } else if (req.kind === 'SX_BUDGET') {
+    const budgets = DB.get('sx_budgets') || [];
+    const bg = budgets.find(x => x.id === p.sx_budget_id);
+    if (bg) { bg.status = 'APPROVED'; DB.set('sx_budgets', budgets); }
+    log(req.opportunity_id, actor.id, 'SX', 'SX_BUDGET_APPROVE', `Duyệt phân bổ ngân sách Sản xuất`);
+  } else if (req.kind === 'BUDGET_ADJ') {
+    const adjusts = DB.get('budget_adjusts') || [];
+    const adj = adjusts.find(x => x.id === p.adj_id);
+    if (adj) { adj.status = 'APPROVED'; DB.set('budget_adjusts', adjusts); }
+    log(req.opportunity_id, actor.id, branch, 'BUDGET_ADJ_APPROVE', `Duyệt điều chỉnh ngân sách (${p.kind})`);
+  }
+}
+
+function applyOpenCode(req, p, actor, branch) {
+  const opps = DB.get('opportunities') || [];
+  const opp = opps.find(o => o.id === req.opportunity_id);
+  const custs = DB.get('customers') || [];
+  const customer = custs.find(c => c.id === opp.customer_id);
+  const customer_code = customer ? customer.code : '000';
+
+  let code, parent_id = null;
+  const codes = DB.get('codes') || [];
+  if (p.code_type === 'TONG') {
+    code = genTongCode(customer_code);
+    opp.status = 'OPEN';
+    DB.set('opportunities', opps);
+  } else {
+    const parent = codes.find(c => c.id === p.parent_id);
+    if (!parent) throw new Error('Không tìm thấy mã cha');
+    if ((p.code_type === 'SALE' || p.code_type === 'SX') && parent.type !== 'TONG') throw new Error('Mã Sale/Sản xuất phải là con của mã Tổng');
+    if (p.code_type === 'OUTSOURCE' && parent.type !== 'SX') throw new Error('Mã Outsource phải là con của mã Sản xuất');
+    code = childCode(parent, p.code_type);
+    parent_id = parent.id;
+  }
+
+  codes.push({
+    id: codes.length + 1,
+    opportunity_id: req.opportunity_id,
+    code,
+    type: p.code_type,
+    parent_id,
+    purpose: p.purpose || '',
+    status: 'ACTIVE',
+    created_at: new Date().toISOString()
+  });
+  DB.set('codes', codes);
+  log(req.opportunity_id, actor.id, branch, 'CODE_OPEN', `Mở mã ${p.code_type}: ${code}`);
+
+  if (p.code_type === 'TONG') {
+    const newCodes = DB.get('codes') || [];
+    const tong = newCodes.find(c => c.opportunity_id === opp.id && c.type === 'TONG');
+    if (opp.want_sale) createRequest({ opportunity_id: opp.id, kind: 'OPEN_CODE', title: 'Mở mã Kinh doanh',
+      payload: { code_type: 'SALE', parent_id: tong.id, purpose: 'Pipeline/Sales' }, requested_by: req.requested_by, branch: 'SALES' });
+    if (opp.want_sx) createRequest({ opportunity_id: opp.id, kind: 'OPEN_CODE', title: 'Mở mã Sản xuất',
+      payload: { code_type: 'SX', parent_id: tong.id, purpose: 'Sản xuất/Triển khai', branch: 'SX' }, requested_by: req.requested_by, branch: 'SX' });
+  }
+}
+
+function assertClosable(c) {
+  const codes = DB.get('codes') || [];
+  const openCount = codes.filter(x => x.parent_id === c.id && x.status !== 'CLOSED').length;
+  if (openCount > 0) throw new Error(`Không thể đóng ${c.code}: còn ${openCount} mã con chưa đóng`);
+  if (c.type === 'TONG') {
+    const sibCount = codes.filter(x => x.opportunity_id === c.opportunity_id && x.type !== 'TONG' && x.status !== 'CLOSED').length;
+    if (sibCount > 0) throw new Error('Mã Tổng chỉ đóng sau cùng');
+  }
+}
+
+function applyCloseCode(req, p, actor, branch) {
+  const codes = DB.get('codes') || [];
+  const c = codes.find(x => x.id === p.code_id);
+  if (!c) throw new Error('Không tìm thấy mã');
+  assertClosable(c);
+  c.status = 'CLOSED';
+  c.closed_at = new Date().toISOString();
+  DB.set('codes', codes);
+  log(req.opportunity_id, actor.id, branch, 'CODE_CLOSE', `Đóng mã ${c.type}: ${c.code}`);
+  if (c.type === 'TONG') {
+    const opps = DB.get('opportunities') || [];
+    const opp = opps.find(o => o.id === req.opportunity_id);
+    if (opp) {
+      opp.status = 'CLOSED';
+      DB.set('opportunities', opps);
+    }
+  }
+}
+
+function computeSalesPhase(p) {
+  const cv = p.contract_value || 0;
+  const rd = cv * (p.pct_rd || 0);
+  const net = cv - rd;
+  const sx = net * ((p.pct_dev || 0) + (p.pct_reserve || 0) + (p.pct_bonus || 0) + (p.pct_warranty || 0));
+  const kd = net * ((p.pct_sal || 0) + (p.pct_external || 0) + (p.pct_travel || 0) + (p.pct_contingency || 0) + (p.pct_sales_bonus || 0));
+  const audit = net * (p.pct_audit || 0);
+  const finance = net * (p.pct_finance || 0);
+  const overhead = net * (p.pct_overhead || 0);
+  const lntt = net - sx - kd - audit - finance - overhead;
+  return { cv, rd, net,
+    dev: net * (p.pct_dev || 0), reserve: net * (p.pct_reserve || 0), bonus: net * (p.pct_bonus || 0), warranty: net * (p.pct_warranty || 0), sx,
+    sal: net * (p.pct_sal || 0), external: net * (p.pct_external || 0), travel: net * (p.pct_travel || 0), contingency: net * (p.pct_contingency || 0), sales_bonus: net * (p.pct_sales_bonus || 0), kd,
+    audit, finance, overhead, lntt, margin: cv > 0 ? lntt / cv : 0 };
+}
+
+function rollupSales(opportunity_id) {
+  const phases = (DB.get('pakd_phases') || []).filter(p => p.opportunity_id === opportunity_id).sort((a,b) => a.mvp_no - b.mvp_no);
+  const phasesWithCalc = phases.map(p => ({ ...p, calc: computeSalesPhase(p) }));
+  const appr = phasesWithCalc.filter(p => p.status === 'APPROVED');
+  const sum = f => appr.reduce((a, p) => a + p.calc[f], 0);
+  const total = { cv: sum('cv'), rd: sum('rd'), net: sum('net'), sx: sum('sx'), kd: sum('kd'),
+    audit: sum('audit'), finance: sum('finance'), overhead: sum('overhead'), lntt: sum('lntt') };
+  total.margin = total.cv > 0 ? total.lntt / total.cv : 0;
+  return { phases: phasesWithCalc, total };
+}
+
+function computeSxBudget(b) {
+  const c = b.ceiling || 0;
+  return { dev: c * (b.pct_dev || 0), reserve: c * (b.pct_reserve || 0), bonus: c * (b.pct_bonus || 0),
+    warranty: c * (b.pct_warranty || 0), outsource: c * (b.pct_outsource || 0),
+    total: c * ((b.pct_dev || 0) + (b.pct_reserve || 0) + (b.pct_bonus || 0) + (b.pct_warranty || 0) + (b.pct_outsource || 0)) };
+}
+
+function listSxBudgets(opportunity_id) {
+  const rows = (DB.get('sx_budgets') || []).filter(b => b.opportunity_id === opportunity_id);
+  return rows.map(b => ({ ...b, calc: computeSxBudget(b) }));
+}
+
+const api = async (url, opts = {}) => {
+  await new Promise(r => setTimeout(r, 100));
+
+  const parsedUrl = new URL(url, window.location.origin);
+  const path = parsedUrl.pathname;
+  const searchParams = parsedUrl.searchParams;
+
+  const getSessionUser = () => {
+    const uid = localStorage.getItem('vtx_session_uid');
+    if (!uid) return null;
+    const users = DB.get('users') || [];
+    return users.find(u => u.id === Number(uid)) || null;
+  };
+
+  const requireAuth = () => {
+    const u = getSessionUser();
+    if (!u) throw new Error('Chưa đăng nhập');
+    return u;
+  };
+
+  const getBody = () => {
+    if (opts.body instanceof FormData) {
+      const obj = {};
+      opts.body.forEach((value, key) => {
+        obj[key] = value;
+      });
+      return obj;
+    }
+    return opts.body ? JSON.parse(opts.body) : {};
+  };
+
+  if (path === '/api/login' && opts.method === 'POST') {
+    const { username, password } = getBody();
+    const users = DB.get('users') || [];
+    const u = users.find(x => x.username === username);
+    if (!u || password !== '123456') {
+      throw new Error('Sai tài khoản hoặc mật khẩu');
+    }
+    localStorage.setItem('vtx_session_uid', u.id);
+    return { id: u.id, full_name: u.full_name, role: u.role, block: u.block, role_label: u.role_label };
+  }
+
+  if (path === '/api/logout' && opts.method === 'POST') {
+    localStorage.removeItem('vtx_session_uid');
+    return { ok: true };
+  }
+
+  if (path === '/api/me' && opts.method === 'GET') {
+    const u = getSessionUser();
+    if (!u) throw new Error('Chưa đăng nhập');
+    return u;
+  }
+
+  if (path === '/api/customers') {
+    requireAuth();
+    if (opts.method === 'POST') {
+      const { code, name } = getBody();
+      if (!code || !name) throw new Error('Thiếu mã/tên khách hàng');
+      const custs = DB.get('customers') || [];
+      const newCust = { id: custs.length + 1, code: code.trim(), name: name.trim() };
+      custs.push(newCust);
+      DB.set('customers', custs);
+      return newCust;
+    }
+    return DB.get('customers') || [];
+  }
+
+  if (path === '/api/opportunities') {
+    const user = requireAuth();
+    if (opts.method === 'POST') {
+      const body = getBody();
+      const name = body.name;
+      const customer_id = Number(body.customer_id);
+      const bod_basis = body.bod_basis || '';
+      const want_sale = body.want_sale === '1' || body.want_sale === 1 || body.want_sale === true;
+      const want_sx = body.want_sx === '1' || body.want_sx === 1 || body.want_sx === true;
+      const purpose = body.purpose || 'Mã gom dự án';
+
+      if (!name || !customer_id) throw new Error('Thiếu tên dự án / khách hàng');
+
+      const opps = DB.get('opportunities') || [];
+      const oid = opps.length + 1;
+      const block = user.block || 'Khối A';
+      
+      const newOpp = {
+        id: oid,
+        name,
+        customer_id,
+        block,
+        ae_id: user.id,
+        bod_basis,
+        status: 'DRAFT',
+        want_sale: want_sale ? 1 : 0,
+        want_sx: want_sx ? 1 : 0,
+        created_at: new Date().toISOString()
+      };
+      opps.push(newOpp);
+      DB.set('opportunities', opps);
+
+      const filesInput = $('#m_files');
+      if (filesInput && filesInput.files && filesInput.files.length) {
+        const atts = DB.get('attachments') || [];
+        for (const f of filesInput.files) {
+          atts.push({
+            id: atts.length + 1,
+            opportunity_id: oid,
+            orig_name: f.name,
+            stored_name: f.name,
+            size: f.size,
+            uploaded_at: new Date().toISOString()
+          });
+        }
+        DB.set('attachments', atts);
+      }
+
+      log(oid, user.id, 'SALES', 'OPP_CREATE', `Tạo cơ hội: ${name}`);
+
+      const reqId = createRequest({
+        opportunity_id: oid,
+        kind: 'OPEN_CODE',
+        title: `Mở mã Tổng — ${name}`,
+        payload: { code_type: 'TONG', purpose },
+        requested_by: user.id
+      });
+
+      return { opportunity_id: oid, request_id: reqId };
+    }
+
+    const opps = DB.get('opportunities') || [];
+    const custs = DB.get('customers') || [];
+    const users = DB.get('users') || [];
+    const codes = DB.get('codes') || [];
+
+    const visibleOpps = () => {
+      if (['GDKHOI', 'CTCEO', 'KETOAN', 'GDSX'].includes(user.role)) return opps;
+      return opps.filter(o => o.block === user.block);
+    };
+
+    return visibleOpps().map(o => {
+      const customer = custs.find(c => c.id === o.customer_id);
+      const ae = users.find(u => u.id === o.ae_id);
+      const oppCodes = codes.filter(c => c.opportunity_id === o.id);
+      return {
+        ...o,
+        customer_code: customer ? customer.code : '',
+        customer_name: customer ? customer.name : '',
+        ae_name: ae ? ae.full_name : '',
+        codes: oppCodes
+      };
+    }).reverse();
+  }
+
+  const oppMatch = path.match(/^\/api\/opportunities\/(\d+)$/);
+  if (oppMatch) {
+    const user = requireAuth();
+    const id = Number(oppMatch[1]);
+    const opps = DB.get('opportunities') || [];
+    const o = opps.find(x => x.id === id);
+    if (!o) throw new Error('Không tìm thấy');
+
+    const custs = DB.get('customers') || [];
+    const customer = custs.find(c => c.id === o.customer_id);
+    const users = DB.get('users') || [];
+    const ae = users.find(u => u.id === o.ae_id);
+    const codes = (DB.get('codes') || []).filter(c => c.opportunity_id === o.id);
+    const tong = codes.find(c => c.type === 'TONG');
+    const tong_active = tong && tong.status === 'ACTIVE';
+
+    const reqs = (DB.get('requests') || []).filter(r => r.opportunity_id === o.id)
+      .map(r => ({ ...r, payload: JSON.parse(r.payload) }))
+      .sort((a, b) => b.id - a.id);
+
+    const atts = (DB.get('attachments') || []).filter(a => a.opportunity_id === o.id);
+
+    const seeSales = user.role !== 'GDSX';
+    const seeSx = user.role !== 'AE' && user.role !== 'GDSALES';
+
+    const out = {
+      ...o,
+      customer_code: customer ? customer.code : '',
+      customer_name: customer ? customer.name : '',
+      ae_name: ae ? ae.full_name : '',
+      codes,
+      tong_active,
+      requests: reqs,
+      attachments: atts,
+      perms: { seeSales, seeSx }
+    };
+
+    if (seeSales) out.pakd_sales = rollupSales(o.id);
+    if (seeSx) {
+      out.sx_budgets = listSxBudgets(o.id).map(b => {
+        const phases = DB.get('pakd_phases') || [];
+        const sp = phases.find(ph => ph.id === b.sales_phase_id);
+        return { ...b, _label: sp ? 'NS ' + sp.label : 'NS#' + b.id };
+      });
+    }
+
+    out.budget_adjusts = (DB.get('budget_adjusts') || []).filter(b => b.opportunity_id === o.id)
+      .map(b => ({ ...b, items: JSON.parse(b.items) }))
+      .sort((a, b) => b.id - a.id);
+
+    return out;
+  }
+
+  if (path === '/api/requests' && opts.method === 'POST') {
+    const user = requireAuth();
+    const { opportunity_id, kind, payload } = getBody();
+    const opps = DB.get('opportunities') || [];
+    if (!opps.some(o => o.id === opportunity_id)) throw new Error('Cơ hội không tồn tại');
+
+    let title = '';
+    if (kind === 'OPEN_CODE') {
+      const t = payload.code_type;
+      if (user.role === 'GDSX') {
+        if (!['SX', 'OUTSOURCE'].includes(t)) throw new Error('GĐ Sản xuất chỉ tạo mã Sản xuất/Outsource');
+      } else if (!['AE', 'GDSALES', 'GDKHOI'].includes(user.role)) {
+        throw new Error('Vai trò này không tạo được mã');
+      }
+      title = `Mở mã ${t}`;
+      if (['SX', 'OUTSOURCE'].includes(t)) payload.branch = 'SX';
+    } else if (kind === 'CLOSE_CODE') {
+      const codes = DB.get('codes') || [];
+      const c = codes.find(x => x.id === payload.code_id);
+      title = `Đóng mã ${c ? c.type + ' ' + c.code : ''}`;
+      if (c && (c.type === 'SX' || c.type === 'OUTSOURCE')) payload.branch = 'SX';
+    } else {
+      throw new Error('kind không hợp lệ');
+    }
+
+    const id = createRequest({
+      opportunity_id,
+      kind,
+      title,
+      payload,
+      requested_by: user.id,
+      branch: payload.branch || 'SALES'
+    });
+    return { request_id: id };
+  }
+
+  if (path === '/api/requests/inbox' && opts.method === 'GET') {
+    const user = requireAuth();
+    if (user.role !== 'GDKHOI') throw new Error('Không đủ quyền');
+    const reqs = (DB.get('requests') || []).filter(r => r.status === 'PENDING');
+    const opps = DB.get('opportunities') || [];
+    const users = DB.get('users') || [];
+
+    return reqs.map(r => {
+      const opp = opps.find(o => o.id === r.opportunity_id);
+      const by = users.find(u => u.id === r.requested_by);
+      return {
+        ...r,
+        payload: JSON.parse(r.payload),
+        opp: opp ? { name: opp.name, block: opp.block } : null,
+        requester: by ? by.full_name : '',
+        last_step: 1
+      };
+    });
+  }
+
+  const actMatch = path.match(/^\/api\/requests\/(\d+)\/act$/);
+  if (actMatch && opts.method === 'POST') {
+    const user = requireAuth();
+    const id = Number(actMatch[1]);
+    const { decision, comment } = getBody();
+    return actOnRequest(id, user, decision, comment);
+  }
+
+  const pakdMatch = path.match(/^\/api\/pakd\/(\d+)$/);
+  if (pakdMatch && opts.method === 'POST') {
+    const user = requireAuth();
+    if (!['AE', 'GDSALES', 'GDKHOI'].includes(user.role)) throw new Error('Không đủ quyền');
+    const oppId = Number(pakdMatch[1]);
+    const opps = DB.get('opportunities') || [];
+    const o = opps.find(x => x.id === oppId);
+    if (!o) throw new Error('Không tìm thấy cơ hội');
+
+    const codes = DB.get('codes') || [];
+    const tong = codes.find(c => c.opportunity_id === o.id && c.type === 'TONG');
+    if (!tong || tong.status !== 'ACTIVE') throw new Error('Chỉ tạo PAKD khi mã Tổng đã được phê duyệt');
+
+    const b = getBody();
+    const n = v => { const x = Number(v); return isNaN(x) ? 0 : x; };
+
+    const phases = (DB.get('pakd_phases') || []).filter(p => p.opportunity_id === o.id && p.branch === 'SALES');
+    const maxMvp = phases.reduce((max, p) => p.mvp_no > max ? p.mvp_no : max, 0);
+    const mvp_no = maxMvp + 1;
+    const label = b.label || `MVP${mvp_no}`;
+
+    const newPhases = DB.get('pakd_phases') || [];
+    const phase_id = newPhases.length + 1;
+    newPhases.push({
+      id: phase_id,
+      opportunity_id: o.id,
+      branch: 'SALES',
+      mvp_no,
+      label,
+      status: 'PENDING',
+      contract_value: n(b.contract_value),
+      pct_rd: n(b.pct_rd),
+      pct_dev: n(b.pct_dev),
+      pct_reserve: n(b.pct_reserve),
+      pct_bonus: n(b.pct_bonus),
+      pct_warranty: n(b.pct_warranty),
+      pct_sal: n(b.pct_sal),
+      pct_external: n(b.pct_external),
+      pct_travel: n(b.pct_travel),
+      pct_contingency: n(b.pct_contingency),
+      pct_sales_bonus: n(b.pct_sales_bonus),
+      pct_audit: n(b.pct_audit),
+      pct_finance: n(b.pct_finance),
+      pct_overhead: n(b.pct_overhead),
+      created_by: user.id,
+      created_at: new Date().toISOString()
+    });
+    DB.set('pakd_phases', newPhases);
+
+    log(o.id, user.id, 'SALES', 'PAKD_CREATE', `Lập PAKD Kinh doanh ${label} (chờ GĐ Khối duyệt)`);
+    createRequest({
+      opportunity_id: o.id,
+      kind: 'PAKD_PHASE',
+      title: `Duyệt PAKD ${label}`,
+      payload: { phase_id, label, branch: 'SALES' },
+      requested_by: user.id,
+      branch: 'SALES'
+    });
+
+    return { ok: true, phase_id };
+  }
+
+  const sxApprMatch = path.match(/^\/api\/sx\/(\d+)\/approved-phases$/);
+  if (sxApprMatch && opts.method === 'GET') {
+    const user = requireAuth();
+    if (!['GDSX', 'GDKHOI'].includes(user.role)) throw new Error('Không đủ quyền');
+    const oppId = Number(sxApprMatch[1]);
+    const phases = (DB.get('pakd_phases') || []).filter(p => p.opportunity_id === oppId && p.branch === 'SALES' && p.status === 'APPROVED');
+    return phases.map(p => {
+      const c = computeSalesPhase(p);
+      return { id: p.id, label: p.label, ceiling: c.sx };
+    });
+  }
+
+  const sxMatch = path.match(/^\/api\/sx\/(\d+)$/);
+  if (sxMatch && opts.method === 'POST') {
+    const user = requireAuth();
+    if (!['GDSX', 'GDKHOI'].includes(user.role)) throw new Error('Không đủ quyền');
+    const oppId = Number(sxMatch[1]);
+    const opps = DB.get('opportunities') || [];
+    const o = opps.find(x => x.id === oppId);
+    if (!o) throw new Error('Không tìm thấy');
+
+    const b = getBody();
+    const phases = DB.get('pakd_phases') || [];
+    const sp = phases.find(ph => ph.id === b.sales_phase_id && ph.branch === 'SALES' && ph.status === 'APPROVED');
+    if (!sp) throw new Error('MVP Sales chưa được duyệt — chưa có trần ngân sách SX');
+
+    const ceiling = computeSalesPhase(sp).sx;
+    const n = v => { const x = Number(v); return isNaN(x) ? 0 : x; };
+    const pcts = [n(b.pct_dev), n(b.pct_reserve), n(b.pct_bonus), n(b.pct_warranty), n(b.pct_outsource)];
+    const sumPct = pcts.reduce((a, x) => a + x, 0);
+    if (sumPct > 1.0001) throw new Error(`Tổng % phân bổ (${(sumPct * 100).toFixed(1)}%) vượt 100% trần ngân sách SX`);
+
+    const budgets = DB.get('sx_budgets') || [];
+    const sx_budget_id = budgets.length + 1;
+    budgets.push({
+      id: sx_budget_id,
+      opportunity_id: o.id,
+      sales_phase_id: sp.id,
+      ceiling,
+      pct_dev: pcts[0],
+      pct_reserve: pcts[1],
+      pct_bonus: pcts[2],
+      pct_warranty: pcts[3],
+      pct_outsource: pcts[4],
+      status: 'PENDING',
+      created_by: user.id,
+      created_at: new Date().toISOString()
+    });
+    DB.set('sx_budgets', budgets);
+
+    log(o.id, user.id, 'SX', 'SX_BUDGET_CREATE', `Phân bổ ngân sách Sản xuất cho ${sp.label} (trần ${ceiling.toLocaleString('en-US')} VNĐ)`);
+    createRequest({
+      opportunity_id: o.id,
+      kind: 'SX_BUDGET',
+      title: `Duyệt phân bổ NS Sản xuất ${sp.label}`,
+      payload: { sx_budget_id, branch: 'SX' },
+      requested_by: user.id,
+      branch: 'SX'
+    });
+
+    return { ok: true, sx_budget_id };
+  }
+
+  const adjMatch = path.match(/^\/api\/budget-adjust\/(\d+)$/);
+  if (adjMatch && opts.method === 'POST') {
+    const user = requireAuth();
+    const oppId = Number(adjMatch[1]);
+    const opps = DB.get('opportunities') || [];
+    const o = opps.find(x => x.id === oppId);
+    if (!o) throw new Error('Không tìm thấy');
+
+    const { kind, phase_label, reason, impact_schedule, impact_profit, source_cover, items } = getBody();
+    if (kind === 'ADJ_SX' || (kind === 'ALLOC' && getBody().scope === 'SX')) {
+      if (!['GDSX', 'GDKHOI'].includes(user.role)) throw new Error('Chỉ GĐ Sản xuất/GĐ Khối');
+    } else {
+      if (!['AE', 'GDSALES', 'GDKHOI'].includes(user.role)) throw new Error('Chỉ AE/GĐ Sales/GĐ Khối');
+    }
+
+    const branch = (kind === 'ADJ_SX' || getBody().scope === 'SX') ? 'SX' : 'SALES';
+
+    const adjusts = DB.get('budget_adjusts') || [];
+    const adj_id = adjusts.length + 1;
+    adjusts.push({
+      id: adj_id,
+      opportunity_id: o.id,
+      kind,
+      phase_label: phase_label || '',
+      reason: reason || '',
+      impact_schedule: impact_schedule || '',
+      impact_profit: impact_profit || '',
+      source_cover: source_cover || '',
+      items: JSON.stringify(items || []),
+      status: 'PENDING',
+      created_by: user.id,
+      created_at: new Date().toISOString()
+    });
+    DB.set('budget_adjusts', adjusts);
+
+    const label = { ALLOC: 'Yêu cầu cấp phát ngân sách', ADJ_SALES: 'Điều chỉnh NS KD', ADJ_SX: 'Điều chỉnh NS SX' }[kind] || kind;
+    log(o.id, user.id, branch, 'BUDGET_ADJ_CREATE', `${label} (${phase_label || ''})`);
+    createRequest({
+      opportunity_id: o.id,
+      kind: 'BUDGET_ADJ',
+      title: label,
+      payload: { adj_id, kind, branch },
+      requested_by: user.id,
+      branch
+    });
+
+    return { ok: true, adj_id };
+  }
+
+  if (path === '/api/audit' && opts.method === 'GET') {
+    const user = requireAuth();
+    const branch = searchParams.get('branch') === 'SX' ? 'SX' : 'SALES';
+    if (branch === 'SX' && user.role === 'AE') throw new Error('AE không xem nhật ký Sản xuất');
+
+    const logs = DB.get('audit_log') || [];
+    const opps = DB.get('opportunities') || [];
+    const users = DB.get('users') || [];
+
+    const rows = logs.filter(l => l.branch === branch).map(l => {
+      const opp = opps.find(o => o.id === l.opportunity_id);
+      const actor = users.find(u => u.id === l.actor_id);
+      return {
+        ...l,
+        actor: actor ? actor.full_name : '',
+        opp_name: opp ? opp.name : '',
+        block: opp ? opp.block : '',
+        ae_id: opp ? opp.ae_id : null
+      };
+    }).reverse();
+
+    let filtered = rows;
+    if (branch === 'SALES') {
+      if (['GDKHOI', 'CTCEO', 'KETOAN'].includes(user.role)) filtered = rows;
+      else filtered = rows.filter(r => !r.block || r.block === user.block);
+      if (user.role === 'AE') filtered = filtered.filter(r => r.ae_id === user.id);
+    }
+    return filtered.slice(0, 500);
+  }
+
+  const attachMatch = path.match(/^\/api\/attachments\/(\d+)$/);
+  if (attachMatch && opts.method === 'GET') {
+    requireAuth();
+    const id = Number(attachMatch[1]);
+    const a = (DB.get('attachments') || []).find(x => x.id === id);
+    if (!a) throw new Error('Không tìm thấy file');
+
+    const blob = new Blob([`Nội dung giả lập của file đính kèm: ${a.orig_name}`], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = a.orig_name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    return { ok: true };
+  }
+
+  throw new Error(`Endpoint không hợp lệ: ${path}`);
+};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dt=s=>s?new Date(s).toLocaleString('vi-VN'):'';
 const vnd=n=>Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2})+' VNĐ';
