@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMIS Portal — Quản lý Mã dự án</title>
+<style>
+  :root{
+    --nav:#0f1729; --nav2:#1a2440; --nav-line:#26304d; --accent:#16c784;
+    --vtx:#2563eb; --vtx-d:#1d4ed8;
+    --bg:#f1f4f9; --card:#fff; --line:#e4e8f0; --txt:#1e293b; --muted:#7a869a;
+    --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --pend:#64748b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
+  .hidden{display:none!important}
+  code{font-family:'Courier New',monospace;background:#eef2fb;padding:1px 6px;border-radius:4px;color:var(--vtx-d)}
+  input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:7px;font-size:14px;font-family:inherit;background:#fff}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--vtx)}
+  button{background:var(--vtx);color:#fff;border:none;padding:9px 15px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:bold;font-family:inherit}
+  button:hover{filter:brightness(1.08)} button.ghost{background:#fff;color:var(--vtx);border:1px solid var(--vtx)}
+  button.sm{padding:5px 10px;font-size:12px;font-weight:normal} button.danger{background:var(--bad)} button.ok{background:var(--ok)}
+  label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px;font-weight:bold}
+  .err{color:var(--bad);font-size:12px;min-height:16px;margin-bottom:6px}
+
+  /* LOGIN */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f1729,#1d4ed8)}
+  .login-card{background:#fff;border-radius:14px;padding:38px;width:380px;box-shadow:0 24px 70px rgba(0,0,0,.4)}
+  .logo{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo .mark{width:42px;height:42px;background:#0f1729;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:22px}
+  .logo .t{font-size:20px;font-weight:bold;color:#0f1729} .logo .t small{display:block;font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:normal}
+  .login-card h2{font-size:15px;margin:20px 0 14px}
+  .hint{font-size:11px;color:var(--muted);margin-top:14px;line-height:1.7}
+
+  /* LAYOUT */
+  #app{display:flex;min-height:100vh}
+  aside{width:248px;background:var(--nav);color:#cdd5e4;flex-shrink:0;display:flex;flex-direction:column}
+  aside .brand{padding:18px 20px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--nav-line)}
+  aside .brand .mark{width:38px;height:38px;background:#fff;color:#0f1729;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:20px}
+  aside .brand .t{font-size:15px;font-weight:bold;color:#fff;line-height:1.1}
+  aside .brand .t small{display:block;font-size:9px;letter-spacing:1.5px;color:#7a869a;font-weight:normal;margin-top:2px}
+  aside .ent{font-size:9px;background:var(--accent);color:#06281b;padding:2px 7px;border-radius:10px;font-weight:bold;margin-left:auto}
+  .navsec{padding:16px 20px 6px;font-size:10px;letter-spacing:1.5px;color:#5a6478;font-weight:bold}
+  .navgrp{padding:11px 20px;display:flex;align-items:center;gap:11px;color:#fff;font-weight:bold;font-size:13px;background:var(--nav2);border-left:3px solid var(--accent)}
+  .navitem{padding:9px 20px 9px 30px;color:#9aa6bd;cursor:pointer;font-size:13px;border-left:3px solid transparent;display:flex;align-items:center;gap:8px}
+  .navitem:hover{color:#fff;background:rgba(255,255,255,.04)}
+  .navitem.active{color:#fff;background:rgba(22,199,132,.10);border-left-color:var(--accent)}
+  .navitem .dash{color:#566} 
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 22px;gap:16px}
+  .topbar .burger{font-size:20px;color:var(--muted);cursor:pointer}
+  .topbar .crumb{color:var(--muted);font-size:15px} .topbar .crumb b{color:var(--txt)}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .topbar .who{text-align:right;font-size:12px;line-height:1.3} .topbar .who b{display:block}
+  .avatar{width:34px;height:34px;border-radius:50%;background:var(--vtx);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:bold}
+  .content{padding:22px;overflow:auto}
+
+  .panel{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:18px}
+  .panel-h{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .panel-h h3{font-size:15px;flex:1} .panel-b{padding:18px}
+  .tabs{display:flex;gap:2px;padding:0 18px;border-bottom:1px solid var(--line);background:#fafbfd}
+  .tab{padding:14px 18px;cursor:pointer;font-weight:bold;color:var(--muted);border-bottom:3px solid transparent;font-size:14px}
+  .tab.active{color:var(--vtx);border-bottom-color:var(--vtx)}
+  .tab .cnt{color:var(--muted);font-weight:normal}
+  .toolbar{display:flex;gap:10px;align-items:center;padding:14px 18px;flex-wrap:wrap}
+  .toolbar .search{margin-left:auto;max-width:280px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{background:#fff;color:var(--txt);font-size:12px;border-bottom:2px solid var(--line);white-space:nowrap}
+  tr:hover td{background:#fafbff}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:bold;color:#fff;white-space:nowrap}
+  .b-active,.b-approved,.b-open{background:var(--ok)} .b-pending,.b-draft{background:var(--pend)}
+  .b-closed{background:var(--vtx)} .b-rejected{background:var(--bad)}
+  .tag{font-size:11px;background:#eef2fb;color:var(--vtx-d);padding:2px 8px;border-radius:5px}
+  .empty{text-align:center;color:var(--muted);padding:36px}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .kv b{color:var(--nav)} .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px}
+  .muted{color:var(--muted)}
+  .pill-step{display:inline-flex;gap:3px;align-items:center}
+  .sdot{width:17px;height:17px;border-radius:50%;background:var(--line);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center}
+  .sdot.done{background:var(--ok)} .sdot.cur{background:var(--warn)}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,41,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal{background:#fff;border-radius:12px;padding:24px;width:600px;max-width:100%;max-height:92vh;overflow:auto}
+  .modal h3{margin-bottom:6px} .row{display:flex;gap:14px;flex-wrap:wrap} .col{flex:1;min-width:200px}
+  .filechip{display:inline-flex;align-items:center;gap:6px;background:#eef2fb;padding:5px 10px;border-radius:6px;font-size:12px;margin:3px 4px 0 0}
+  .ck{display:flex;align-items:center;gap:8px;margin:8px 0} .ck input{width:auto}
+  .vnd{position:relative}
+  .pakd-table th,.pakd-table td{padding:7px 10px}
+  .pakd-table .lbl{text-align:left;font-weight:normal}
+  .total-col{background:#eef7f1;font-weight:bold}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:#fff;color:var(--muted);border:none;border-radius:0;font-weight:bold;padding:8px 16px}
+  .seg button.active{background:var(--vtx);color:#fff}
+</style>
+</head>
+<body>
+<div id="login">
+  <div class="login-card">
+    <div class="logo"><div class="mark">✕</div><div class="t">IMIS <small>PORTAL SYSTEM</small></div></div>
+    <h2>Đăng nhập hệ thống</h2>
+    <div class="err" id="loginErr"></div>
+    <label>Tài khoản</label><input id="u" autocomplete="username">
+    <label>Mật khẩu</label><input id="p" type="password" autocomplete="current-password">
+    <button style="width:100%;margin-top:14px" onclick="doLogin()">Đăng nhập</button>
+    <div class="hint"><b>Tài khoản demo</b> (mật khẩu <code>123456</code>):<br>
+      ae · sales · sanxuat · khoi · ceo · ketoan</div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <aside>
+    <div class="brand"><div class="mark">✕</div><div class="t">IMIS<small>PORTAL SYSTEM</small></div><span class="ent">ENTERPRISE</span></div>
+    <div class="navsec">NAVIGATION CENTER</div>
+    <div class="navgrp">▣ PROJECT MANAGEMENT</div>
+    <div id="nav"></div>
+  </aside>
+  <main>
+    <div class="topbar">
+      <span class="burger">☰</span>
+      <span class="crumb">Home › Project Management › <b id="crumb">Cơ hội kinh doanh</b></span>
+      <div class="right">
+        <div class="who" id="who"></div><div class="avatar" id="avatar"></div>
+        <button class="sm ghost" onclick="doLogout()">Thoát</button>
+      </div>
+    </div>
+    <div class="content" id="view"></div>
+  </main>
+</div>
+<div id="modalRoot"></div>
+<script src="/app.js"></script>
+</body>
+</html>
