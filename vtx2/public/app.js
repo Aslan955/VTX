@@ -11,9 +11,9 @@ const DB = {
   },
   init() {
     let resetForSeed = false;
-    if (!localStorage.getItem('seeded_v3')) {
+    if (!localStorage.getItem('seeded_v4')) {
       localStorage.clear();
-      localStorage.setItem('seeded_v3', 'true');
+      localStorage.setItem('seeded_v4', 'true');
       resetForSeed = true;
     }
     if (!this.get('users') || resetForSeed) {
@@ -31,7 +31,10 @@ const DB = {
         { id: 1, code: '012', name: 'Sở TT&TT tỉnh Bắc Giang' },
         { id: 2, code: '002', name: 'UBND tỉnh Quảng Ninh' },
         { id: 3, code: '022', name: 'Bộ Tài chính' },
-        { id: 4, code: '030', name: 'Sở Thông tin và Truyền thông tỉnh Bắc Ninh' }
+        { id: 4, code: '030', name: 'Sở Thông tin và Truyền thông tỉnh Bắc Ninh' },
+        { id: 5, code: '031', name: 'UBND tỉnh Bắc Ninh' },
+        { id: 6, code: '032', name: 'Sở Thông tin và Truyền thông tỉnh Hải Dương' },
+        { id: 7, code: '033', name: 'Tập đoàn Công nghệ Viễn thông VTX' }
       ]);
     }
     if (!this.get('opportunities') || resetForSeed) {
